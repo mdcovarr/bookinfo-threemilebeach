@@ -3,7 +3,7 @@
 """
 from __future__ import print_function
 from flask_bootstrap import Bootstrap
-from flask import Flask, request, session, render_template, redirect, url_for
+from flask import Flask, request, session, render_template, redirect, url_for, Response
 from flask import _request_ctx_stack as stack
 from jaeger_client import Tracer, ConstSampler
 from jaeger_client.reporter import NullReporter
@@ -49,15 +49,18 @@ def details(id):
     headers = getForwardHeaders(request)
     details = get_book_details(id, headers)
 
+    response = Response(response=details, status=400, mimetype="application/json")
+    return response
+
 # TODO: provide details on different books.
 def get_book_details(ID, headers):
-    isbn = "0486424618"
     if os.environ.get("ENABLE_EXTERNAL_BOOK_SERVICE") != None:
         # the ISBN of one of Comedy of Errors on the Amazon
         # that has Shakespeare as the single author
         isbn = "0486424618"
         return fetch_details_from_external_service(isbn, ID, headers)
 
+    isbn = "0486424618"
     return fetch_details_from_external_service(isbn, ID, headers)
     return {
         "id": ID,
@@ -82,27 +85,54 @@ def fetch_details_from_external_service(isbn, ID, headers):
     if not use_ssl:
         port = 80
 
-    conn = http_client.HTTPConnection(uri.hostname, port=port, timeout=5)
+    if not use_ssl:
+        conn = http_client.HTTPConnection(uri.hostname, port=port, timeout=5)
+    else:
+        conn = http_client.HTTPSConnection(uri.hostname, port=port, timeout=5)
+
+
     url = uri.geturl()
-    conn.request("GET", uri.geturl())
+    conn.request("GET", url)
     r1 = conn.getresponse()
-    data = r1.read()
-    print(data)
+    data = json.loads(r1.read())
+
+    book = data["items"][0]["volumeInfo"]
+    language = ""
+    type = ""
+
+    if book["language"] == "en":
+        language = "English"
+    else:
+        language = "unknown"
+
+    if book["printType"] == "BOOK":
+        type = "paperback"
+    else:
+        type = "unknown"
+
+    isbn10 = get_isbn(book, 'ISBN_10')
+    isbn13 = get_isbn(book, 'ISBN_13')
 
     return {
         "id": ID,
-        'author': 'William Shakespeare',
-        'year': 1595,
-        'type': 'paperback',
-        'pages': 200,
-        'publisher': 'PublisherA',
-        'language': 'English',
-        'ISBN-10': '1234567890',
-        'ISBN-13': '123-1234567890'
+        "author": book["authors"][0],
+        "year": book['publishedDate'],
+        "type": type,
+        "pages": book['pageCount'],
+        "publisher": book['publisher'],
+        "language": language,
+        "ISBN-10": isbn10,
+        "ISBN-13": isbn13
     }
 
 def get_isbn(book, isbn_type):
-    pass
+    isbn_identifiers = book["industryIdentifiers"]
+
+    for obj in isbn_identifiers:
+        if obj["type"] == isbn_type:
+            return obj["identifier"]
+
+    return isbn_identifiers[0]["identifier"]
 
 def getForwardHeaders(request):
     headers = {}
