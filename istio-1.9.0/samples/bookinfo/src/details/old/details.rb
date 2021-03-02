@@ -77,13 +77,17 @@ end
 
 # TODO: provide details on different books.
 def get_book_details(id, headers)
+=begin
     if ENV['ENABLE_EXTERNAL_BOOK_SERVICE'] === 'true' then
       # the ISBN of one of Comedy of Errors on the Amazon
       # that has Shakespeare as the single author
         isbn = '0486424618'
         return fetch_details_from_external_service(isbn, id, headers)
     end
-
+=end
+    isbn = '0486424618'
+    return fetch_details_from_external_service(isbn, id, headers)
+=begin
     return {
         'id' => id,
         'author': 'William Shakespeare',
@@ -95,6 +99,7 @@ def get_book_details(id, headers)
         'ISBN-10' => '1234567890',
         'ISBN-13' => '123-1234567890'
     }
+=end
 end
 
 def fetch_details_from_external_service(isbn, id, headers)
@@ -114,6 +119,8 @@ def fetch_details_from_external_service(isbn, id, headers)
 
     request = Net::HTTP::Get.new(uri.request_uri)
     headers.each { |header, value| request[header] = value }
+
+    puts uri.request_uri
 
     response = http.request(request)
 
