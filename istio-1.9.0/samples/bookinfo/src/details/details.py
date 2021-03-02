@@ -3,14 +3,7 @@
 """
 from __future__ import print_function
 from flask_bootstrap import Bootstrap
-from flask import Flask, request, session, render_template, redirect, url_for, Response
-from flask import _request_ctx_stack as stack
-from jaeger_client import Tracer, ConstSampler
-from jaeger_client.reporter import NullReporter
-from jaeger_client.codecs import B3Codec
-from opentracing.ext import tags
-from opentracing.propagation import Format
-from opentracing_instrumentation.request_context import get_current_span, span_in_context
+from flask import Flask, request, jsonify
 from urllib.parse import urlparse
 import simplejson as json
 import requests
@@ -49,8 +42,7 @@ def details(id):
     headers = getForwardHeaders(request)
     details = get_book_details(id, headers)
 
-    response = Response(response=details, status=400, mimetype="application/json")
-    return response
+    return jsonify(details), 200
 
 # TODO: provide details on different books.
 def get_book_details(ID, headers):
@@ -60,8 +52,6 @@ def get_book_details(ID, headers):
         isbn = "0486424618"
         return fetch_details_from_external_service(isbn, ID, headers)
 
-    isbn = "0486424618"
-    return fetch_details_from_external_service(isbn, ID, headers)
     return {
         "id": ID,
         'author': 'William Shakespeare',
