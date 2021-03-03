@@ -320,7 +320,7 @@ def front():
         Initially we can just add a Record
         1. Create Record of Request from 'Client'
     """
-    FI_TRACE = False
+    FI_TRACE = True
     data = {
         "records": [],
         "tfis": [],
@@ -341,13 +341,16 @@ def front():
         details_req_uuid = uuid.uuid4().hex
         data["records"].append(generate_record(uuid=details_req_uuid, type=1, message_name="product details request", service=serviceUUID))
 
+        headers["fi-trace"] = json.dumps(data)
+
         product = getProduct(product_id)
-        detailsStatus, details, new_data = getProductDetails(product_id, headers, data)
+        detailsStatus, details, data = getProductDetails(product_id, headers)
+        data = json.loads(data)
 
         data["records"].append(generate_record(uuid=details_req_uuid, type=2, message_name="product details response", service=serviceUUID))
     else:
         product = getProduct(product_id)
-        detailsStatus, details, new_data = getProductDetails(product_id, headers, data)
+        detailsStatus, details, new_data = getProductDetails(product_id, headers)
 
 
     if flood_factor > 0:
@@ -436,25 +439,17 @@ def getProduct(product_id):
         return products[product_id]
 
 
-def getProductDetails(product_id, headers, fi_trace=None):
-    data = None
+def getProductDetails(product_id, headers):
     try:
-        if fi_trace:
-            headers["x-fi-trace"] = json.dumps(fi_trace)
         url = details['name'] + "/" + details['endpoint'] + "/" + str(product_id)
         res = requests.get(url, headers=headers, timeout=3.0)
-
-        # Need to check if there is an FI_Trace
-        if 'x-fi-trace' in res.headers:
-            data = json.loads(res.headers['x-fi-trace'])
-
     except BaseException:
         res = None
     if res and res.status_code == 200:
-        return 200, res.json(), data
+        return 200, res.json(), res.headers["fi-trace"]
     else:
         status = res.status_code if res is not None and res.status_code else 500
-        return status, {'error': 'Sorry, product details are currently unavailable for this book.'}, data
+        return status, {'error': 'Sorry, product details are currently unavailable for this book.'}, headers["fi-trace"]
 
 
 def getProductReviews(product_id, headers):

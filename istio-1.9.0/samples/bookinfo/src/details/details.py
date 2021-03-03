@@ -3,7 +3,7 @@
 """
 from __future__ import print_function
 from flask_bootstrap import Bootstrap
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from urllib.parse import urlparse
 import simplejson as json
 import requests
@@ -13,6 +13,8 @@ import os
 import asyncio
 import uuid
 import time
+
+serviceUUID = uuid.uuid4().hex
 
 try:
     import http.client as http_client
@@ -28,9 +30,23 @@ app.logger.addHandler(logging.StreamHandler(sys.stdout))
 app.logger.setLevel(logging.DEBUG)
 
 
-app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'
+app.secret_key = b'_5#y2L"F3Q9z\n\xec]/'
 
 Bootstrap(app)
+
+
+def generate_record(**kwargs):
+    """
+        Function used to generate a record if we are
+        Attempting to trace
+    """
+    return {
+        "message_name": kwargs["message_name"],
+        "service": kwargs["service"],
+        "timestamp": int(time.time()),
+        "type": kwargs["type"],
+        "uuid": kwargs["uuid"]
+    }
 
 @app.route("/health")
 def health():
@@ -38,11 +54,33 @@ def health():
 
 @app.route("/details/<id>")
 def details(id):
-    id = int(id)
-    headers = getForwardHeaders(request)
-    details = get_book_details(id, headers)
+    FI_TRACE = True
+    data = {}
 
-    return jsonify(details), 200
+    if request.headers.get("fi-trace"):
+        FI_TRACE = True
+        data = json.loads(request.headers.get("fi-trace"))
+
+    if FI_TRACE:
+        data["records"].append(generate_record(uuid="IN DETAILS", type=2, message_name="product details request", service=serviceUUID))
+
+        id = int(id)
+        headers = getForwardHeaders(request)
+        details = get_book_details(id, headers)
+
+        data["records"].append(generate_record(uuid="IN DETAILS", type=1, message_name="product details response", service=serviceUUID))
+    else:
+        id = int(id)
+        headers = getForwardHeaders(request)
+        details = get_book_details(id, headers)
+
+
+    if FI_TRACE:
+        response = make_response(jsonify(details))
+        response.headers["fi-trace"] = json.dumps(data)
+        return response
+    else:
+        return jsonify(details), 200
 
 # TODO: provide details on different books.
 def get_book_details(ID, headers):
@@ -171,7 +209,7 @@ def getForwardHeaders(request):
       # Application-specific headers to forward.
       'end-user',
       'user-agent',
-      'x-fi-trace'
+      'fi-trace'
     ]
 
     for ihdr in incoming_headers:
