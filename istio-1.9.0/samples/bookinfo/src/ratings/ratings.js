@@ -14,6 +14,9 @@
 
 var http = require('http')
 var dispatcher = require('httpdispatcher')
+var uuid = require('uuid')
+
+var serviceUUID = uuid.v4();
 
 var port = parseInt(process.argv[2])
 
@@ -85,6 +88,15 @@ dispatcher.onPost(/^\/ratings\/[0-9]*/, function (req, res) {
     res.end(JSON.stringify(putLocalReviews(productId, ratings)))
   }
 })
+
+function generateRecord(id, type, messageName, service) {
+    return {
+        "uuid": id,
+        "type": type,
+        "message_name": messageName,
+        "service": service
+    };
+}
 
 dispatcher.onGet(/^\/ratings\/[0-9]*/, function (req, res) {
   var productIdStr = req.url.split('/').pop()
@@ -175,7 +187,7 @@ dispatcher.onGet(/^\/ratings\/[0-9]*/, function (req, res) {
         if (random <= 0.5) {
           getLocalReviewsServiceUnavailable(res)
         } else {
-          getLocalReviewsSuccessful(res, productId)
+          getLocalReviewsSuccessful(req, res, productId)
         }
       }
       else if (process.env.SERVICE_VERSION === 'v-delayed') {
@@ -183,20 +195,20 @@ dispatcher.onGet(/^\/ratings\/[0-9]*/, function (req, res) {
         // in another half proceed as usual
         var random = Math.random(); // returns [0,1]
         if (random <= 0.5) {
-          setTimeout(getLocalReviewsSuccessful, 7000, res, productId)
+          setTimeout(getLocalReviewsSuccessful, 7000, req, res, productId)
         } else {
-          getLocalReviewsSuccessful(res, productId)
+          getLocalReviewsSuccessful(req, res, productId)
         }
       }
       else if (process.env.SERVICE_VERSION === 'v-unavailable' || process.env.SERVICE_VERSION === 'v-unhealthy') {
           if (unavailable) {
               getLocalReviewsServiceUnavailable(res)
           } else {
-              getLocalReviewsSuccessful(res, productId)
+              getLocalReviewsSuccessful(req, res, productId)
           }
       }
       else {
-        getLocalReviewsSuccessful(res, productId)
+        getLocalReviewsSuccessful(req, res, productId)
       }
   }
 })
@@ -219,9 +231,34 @@ function putLocalReviews (productId, ratings) {
   return getLocalReviews(productId)
 }
 
-function getLocalReviewsSuccessful(res, productId) {
-  res.writeHead(200, {'Content-type': 'application/json'})
-  res.end(JSON.stringify(getLocalReviews(productId)))
+function getLocalReviewsSuccessful(req, res, productId) {
+  var FI_TRACE = false;
+  var data = {
+      "records": [],
+      "rlfis": [],
+      "tfis": []
+  };
+
+
+  if (req.headers["fi-trace"]) {
+      FI_TRACE = true;
+      data = JSON.parse(req.headers["fi-trace"]);
+  }
+
+  // Make note of the request
+  data.records.push(generateRecord("IN RATINGS", 2, "product ratings request", serviceUUID))
+
+  var responseData = JSON.stringify(getLocalReviews(productId));
+  var headers = {
+      "Content-type": "application/json",
+      "fi-trace": JSON.stringify(data)
+  }
+
+  // Make note of the response
+  data.records.push(generateRecord("IN RATINGS", 1, "product ratings response", serviceUUID))
+
+  res.writeHead(200, headers)
+  res.end(responseData)
 }
 
 function getLocalReviewsServiceUnavailable(res) {
