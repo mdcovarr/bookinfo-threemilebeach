@@ -360,7 +360,10 @@ def front():
         reviews_req_uuid = uuid.uuid4().hex
         data["records"].append(generate_record(uuid=reviews_req_uuid, type=1, message_name="product reviews request", service=serviceUUID))
 
-        reviewsStatus, reviews = getProductReviews(product_id, headers)
+        headers["fi-trace"] = json.dumps(data)
+
+        reviewsStatus, reviews, data = getProductReviews(product_id, headers)
+        data = json.loads(data)
 
         data["records"].append(generate_record(uuid=reviews_req_uuid, type=2, message_name="product reviews request", service=serviceUUID))
     else:
@@ -462,9 +465,9 @@ def getProductReviews(product_id, headers):
         except BaseException:
             res = None
         if res and res.status_code == 200:
-            return 200, res.json()
+            return 200, res.json(), res.headers["fi-trace"]
     status = res.status_code if res is not None and res.status_code else 500
-    return status, {'error': 'Sorry, product reviews are currently unavailable for this book.'}
+    return status, {'error': 'Sorry, product reviews are currently unavailable for this book.'}, headers["fi-trace"]
 
 
 def getProductRatings(product_id, headers):
