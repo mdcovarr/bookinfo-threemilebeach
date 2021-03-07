@@ -14,7 +14,7 @@ import asyncio
 import uuid
 import time
 
-serviceUUID = uuid.uuid4().hex
+serviceUUID = "detailsservice-{}".format(uuid.uuid4().hex)
 
 try:
     import http.client as http_client
@@ -56,19 +56,23 @@ def health():
 def details(id):
     FI_TRACE = True
     data = {}
+    message_name = ""
+    req_id = ""
 
     if request.headers.get("fi-trace"):
         FI_TRACE = True
         data = json.loads(request.headers.get("fi-trace"))
+        message_name = data["records"][-1]["message_name"]
+        req_id = data["records"][-1]["uuid"]
 
     if FI_TRACE:
-        data["records"].append(generate_record(uuid="IN DETAILS", type=2, message_name="product details request", service=serviceUUID))
+        data["records"].append(generate_record(uuid=req_id, type=2, message_name=message_name, service=serviceUUID))
 
         id = int(id)
         headers = getForwardHeaders(request)
         details = get_book_details(id, headers)
 
-        data["records"].append(generate_record(uuid="IN DETAILS", type=1, message_name="product details response", service=serviceUUID))
+        data["records"].append(generate_record(uuid=req_id, type=1, message_name="Product Details Response", service=serviceUUID))
     else:
         id = int(id)
         headers = getForwardHeaders(request)
