@@ -47,12 +47,14 @@ import java.time.Instant;
 @Path("/")
 public class LibertyRestEndpoint extends Application {
 
-    private final static Boolean ratings_enabled = Boolean.valueOf(System.getenv("ENABLE_RATINGS"));
+    private final static Boolean ratings_enabled = true; //Boolean.valueOf(System.getenv("ENABLE_RATINGS"));
     private final static String star_color = System.getenv("STAR_COLOR") == null ? "black" : System.getenv("STAR_COLOR");
     private final static String services_domain = System.getenv("SERVICES_DOMAIN") == null ? "" : ("." + System.getenv("SERVICES_DOMAIN"));
     private final static String ratings_hostname = System.getenv("RATINGS_HOSTNAME") == null ? "ratings" : System.getenv("RATINGS_HOSTNAME");
-    private final static String ratings_service = "http://" + ratings_hostname + services_domain + ":9080/ratings";
+    //private final static String ratings_service = "http://" + ratings_hostname + services_domain + ":9080/ratings";
+    private final static String ratings_service = "http://0.0.0.0:8899/ratings";
     private final static String service_uuid = "reviewsservice-" + UUID.randomUUID().toString();
+    private static String ratings_response = "{}";
     // HTTP headers to propagate for distributed tracing are documented at
     // https://istio.io/docs/tasks/telemetry/distributed-tracing/overview/#trace-context-propagation
     private final static String[] headers_to_propagate = {
@@ -215,7 +217,6 @@ public class LibertyRestEndpoint extends Application {
       // New object builder
       JsonObjectBuilder job = Json.createObjectBuilder();
 
-      // Needed
       JsonArrayBuilder recordBuilder = Json.createArrayBuilder();
       String last_uuid = "";
 
@@ -230,9 +231,8 @@ public class LibertyRestEndpoint extends Application {
             last_uuid = recObject.getString("uuid");
           }
 
-
           JsonObject requestRecord = Json.createObjectBuilder()
-                                    .add("message_name", "Products Review Request")
+                                    .add("message_name", "Products Reviews Request")
                                     .add("service", service_uuid)
                                     .add("timestamp", Instant.now().getEpochSecond())
                                     .add("type", 2)
@@ -244,23 +244,36 @@ public class LibertyRestEndpoint extends Application {
           job.add(key, jsonObject.get(key));
         }
       }
-
-      JsonArray newArray = recordBuilder.build();
-      job.add("records", newArray);
-
-      // Newly created Object with new record
-      jsonObject = job.build();
-
+      JsonArray newArray;
       Writer writer = new StringWriter();
-      Json.createWriter(writer).write(jsonObject);
-      /*
-        Finish adding record or Response
-      */
-      String jsonString = writer.toString();
+      String jsonString = "";
 
 
       if (ratings_enabled) {
         // Call to Node JS Application
+
+        JsonObject ratingsRequestRecord = Json.createObjectBuilder()
+                                  .add("message_name", "Products Ratings Request")
+                                  .add("service", service_uuid)
+                                  .add("timestamp", Instant.now().getEpochSecond())
+                                  .add("type", 1)
+                                  .add("uuid", UUID.randomUUID().toString())
+                                  .build();
+        recordBuilder.add(ratingsRequestRecord);
+
+        //newArray = recordBuilder.build();
+        //job.add("records", newArray);
+
+        // Newly created Object with new record
+        //jsonObject = job.build();
+
+        //writer = new StringWriter();
+        //Json.createWriter(writer).write(jsonObject);
+        /*
+            Finish adding record or Response
+        */
+        jsonString = writer.toString();
+
         JsonObject ratingsResponse = getRatings(Integer.toString(productId), requestHeaders);
         if (ratingsResponse != null) {
           if (ratingsResponse.containsKey("ratings")) {
@@ -275,19 +288,27 @@ public class LibertyRestEndpoint extends Application {
         }
       }
 
+      /*
+        Get fi-trace response from ratings service
+      */
+
       String jsonResStr = getJsonResponse(Integer.toString(productId), starsReviewer1, starsReviewer2);
 
-
+      /*
+      reader = Json.createReader(new StringReader(ratings_response));
+      jsonObject = reader.readObject();
+      */
       /*
         2. Handle record of Response
       */
       // New object builder
-      job = Json.createObjectBuilder();
+      //job = Json.createObjectBuilder();
 
       // Needed
-      recordBuilder = Json.createArrayBuilder();
-      last_uuid = "";
+      //recordBuilder = Json.createArrayBuilder();
+      //last_uuid = "";
 
+      /*
       // Iterate through incoming records
       for (String key : jsonObject.keySet()) {
         // If records we need to add a new record for the request
@@ -313,7 +334,27 @@ public class LibertyRestEndpoint extends Application {
           job.add(key, jsonObject.get(key));
         }
       }
+      */
+      JsonObject ratingsResponse = Json.createObjectBuilder()
+                              .add("message_name", "Products Ratings Response")
+                              .add("service", service_uuid)
+                              .add("timestamp", Instant.now().getEpochSecond())
+                              .add("type", 2)
+                              .add("uuid", last_uuid)
+                              .build();
 
+
+      JsonObject reviewResponse = Json.createObjectBuilder()
+                              .add("message_name", "Products Reviews Response")
+                              .add("service", service_uuid)
+                              .add("timestamp", Instant.now().getEpochSecond())
+                              .add("type", 1)
+                              .add("uuid", last_uuid)
+                              .build();
+
+
+      recordBuilder.add(ratingsResponse);
+      recordBuilder.add(reviewResponse);
       newArray = recordBuilder.build();
       job.add("records", newArray);
 
@@ -322,11 +363,7 @@ public class LibertyRestEndpoint extends Application {
 
       writer = new StringWriter();
       Json.createWriter(writer).write(jsonObject);
-      /*
-        Finish adding record or Response
-      */
       jsonString = writer.toString();
-
       return Response.ok().type(MediaType.APPLICATION_JSON).entity(jsonResStr).header("fi-trace", jsonString).build();
     }
 }
