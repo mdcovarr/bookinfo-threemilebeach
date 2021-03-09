@@ -72,19 +72,21 @@ flood_factor = 0 if (os.environ.get("FLOOD_FACTOR") is None) else int(os.environ
 
 details = {
     #"name": "http://{0}{1}:9080".format(detailsHostname, servicesDomain),
-    "name": "http://{0}{1}:9080".format("127.0.0.1", ""),
+    "name": "http://{0}{1}:8899".format("127.0.0.1", ""),
     "endpoint": "details",
     "children": []
 }
 
 ratings = {
-    "name": "http://{0}{1}:9080".format(ratingsHostname, servicesDomain),
+    #"name": "http://{0}{1}:9080".format(ratingsHostname, servicesDomain),
+    "name": "http://{0}{1}:8899".format("127.0.0.1", ""),
     "endpoint": "ratings",
     "children": []
 }
 
 reviews = {
-    "name": "http://{0}{1}:9080".format(reviewsHostname, servicesDomain),
+    #"name": "http://{0}{1}:9080".format(reviewsHostname, servicesDomain),
+    "name": "http://{0}{1}:9080".format("127.0.0.1", ""),
     "endpoint": "reviews",
     "children": [ratings]
 }
@@ -426,9 +428,42 @@ def reviewsRoute(product_id):
 @app.route('/api/v1/products/<product_id>/ratings')
 @trace()
 def ratingsRoute(product_id):
-    headers = getForwardHeaders(request)
-    status, ratings = getProductRatings(product_id, headers)
-    return json.dumps(ratings), status, {'Content-Type': 'application/json'}
+    FI_TRACE = False
+    data = {
+        "records": [],
+        "tfis": []
+    }
+    id = ""
+    message_name = ""
+
+    if request.headers.get("fi-trace"):
+        FI_TRACE = True
+        data = json.loads(request.headers.get("fi-trace"))
+
+    if FI_TRACE:
+        message_name = data["records"][-1]["message_name"]
+        id = data["records"][-1]["uuid"]
+        data["records"].append(generate_record(uuid=id, type=2, message_name=message_name, service=serviceUUID))
+
+        ratings_req_uuid = uuid.uuid4().hex
+        data["records"].append(generate_record(uuid=ratings_req_uuid, type=1, message_name="Product Ratings Request", service=serviceUUID))
+
+        headers = getForwardHeaders(request)
+        headers["fi-trace"] = json.dumps(data)
+
+        status, ratings, data = getProductRatings(product_id, headers)
+        data = json.loads(data)
+
+        data["records"].append(generate_record(uuid=ratings_req_uuid, type=2, message_name="Product Ratings Response", service=serviceUUID))
+
+        data["records"].append(generate_record(uuid=id, type=1, message_name="Client Ratings Response", service=serviceUUID))
+
+        return json.dumps(ratings), status, {'Content-Type': 'application/json', 'fi-trace': json.dumps(data)}
+    else:
+        headers = getForwardHeaders(request)
+
+        status, ratings = getProductRatings(product_id, headers)
+        return json.dumps(ratings), status, {'Content-Type': 'application/json'}
 
 
 # Data providers:
@@ -485,10 +520,10 @@ def getProductRatings(product_id, headers):
     except BaseException:
         res = None
     if res and res.status_code == 200:
-        return 200, res.json()
+        return 200, res.json(), res.headers["fi-trace"]
     else:
         status = res.status_code if res is not None and res.status_code else 500
-        return status, {'error': 'Sorry, product ratings are currently unavailable for this book.'}
+        return status, {'error': 'Sorry, product ratings are currently unavailable for this book.'}, headers["fi-trace"]
 
 
 class Writer(object):
