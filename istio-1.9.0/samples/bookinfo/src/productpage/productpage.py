@@ -72,7 +72,7 @@ flood_factor = 0 if (os.environ.get("FLOOD_FACTOR") is None) else int(os.environ
 
 details = {
     #"name": "http://{0}{1}:9080".format(detailsHostname, servicesDomain),
-    "name": "http://{0}{1}:8899".format("127.0.0.1", ""),
+    "name": "http://{0}{1}:8888".format("127.0.0.1", ""),
     "endpoint": "details",
     "children": []
 }
@@ -412,17 +412,79 @@ def productsRoute():
 @app.route('/api/v1/products/<product_id>')
 @trace()
 def productRoute(product_id):
-    headers = getForwardHeaders(request)
-    status, details = getProductDetails(product_id, headers)
-    return json.dumps(details), status, {'Content-Type': 'application/json'}
+    FI_TRACE = False
+    data = {
+        "records": [],
+        "tfis": []
+    }
+    id = ""
+    message_name = ""
+
+    if request.headers.get("fi-trace"):
+        FI_TRACE = True
+        data = json.loads(request.headers.get("fi-trace"))
+
+    if FI_TRACE:
+        message_name = data["records"][-1]["message_name"]
+        id = data["records"][-1]["uuid"]
+        data["records"].append(generate_record(uuid=id, type=2, message_name=message_name, service=serviceUUID))
+
+        details_req_uuid = uuid.uuid4().hex
+        data["records"].append(generate_record(uuid=details_req_uuid, type=1, message_name="Product Details Request", service=serviceUUID))
+
+        headers = getForwardHeaders(request)
+        headers["fi-trace"] = json.dumps(data)
+
+        status, details, data = getProductDetails(product_id, headers)
+        data = json.loads(data)
+
+        data["records"].append(generate_record(uuid=details_req_uuid, type=2, message_name="Product Details Response", service=serviceUUID))
+        data["records"].append(generate_record(uuid=id, type=1, message_name="Client Details Response", service=serviceUUID))
+
+        return json.dumps(details), status, {'Content-Type': 'application/json', 'fi-trace': json.dumps(data)}
+    else:
+        headers = getForwardHeaders(request)
+        status, details = getProductDetails(product_id, headers)
+        return json.dumps(details), status, {'Content-Type': 'application/json'}
 
 
 @app.route('/api/v1/products/<product_id>/reviews')
 @trace()
 def reviewsRoute(product_id):
-    headers = getForwardHeaders(request)
-    status, reviews = getProductReviews(product_id, headers)
-    return json.dumps(reviews), status, {'Content-Type': 'application/json'}
+    FI_TRACE = False
+    data = {
+        "records": [],
+        "tfis": []
+    }
+    id = ""
+    message_name = ""
+
+    if request.headers.get("fi-trace"):
+        FI_TRACE = True
+        data = json.loads(request.headers.get("fi-trace"))
+
+    if FI_TRACE:
+        message_name = data["records"][-1]["message_name"]
+        id = data["records"][-1]["uuid"]
+        data["records"].append(generate_record(uuid=id, type=2, message_name=message_name, service=serviceUUID))
+
+        review_req_uuid = uuid.uuid4().hex
+        data["records"].append(generate_record(uuid=review_req_uuid, type=1, message_name="Product Reviews Request", service=serviceUUID))
+
+        headers = getForwardHeaders(request)
+        headers["fi-trace"] = json.dumps(data)
+
+        status, reviews, data = getProductReviews(product_id, headers)
+        data = json.loads(data)
+
+        data["records"].append(generate_record(uuid=review_req_uuid, type=2, message_name="Product Reviews Response", service=serviceUUID))
+        data["records"].append(generate_record(uuid=id, type=1, message_name="Client Reviews Response", service=serviceUUID))
+
+        return json.dumps(reviews), status, {'Content-Type': 'application/json', 'fi-trace': json.dumps(data)}
+    else:
+        headers = getForwardHeaders(request)
+        status, reviews = getProductReviews(product_id, headers)
+        return json.dumps(reviews), status, {'Content-Type': 'application/json'}
 
 
 @app.route('/api/v1/products/<product_id>/ratings')
