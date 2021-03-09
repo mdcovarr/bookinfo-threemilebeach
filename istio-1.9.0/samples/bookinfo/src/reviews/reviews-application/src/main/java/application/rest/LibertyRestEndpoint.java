@@ -17,7 +17,12 @@ package application.rest;
 
 import javax.json.Json;
 import javax.json.JsonObject;
+import javax.json.JsonObjectBuilder;
+import javax.json.JsonValue;
+import javax.json.JsonArrayBuilder;
+import javax.json.JsonArray;
 import javax.json.JsonReader;
+import javax.json.*;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
@@ -32,6 +37,12 @@ import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.StringReader;
+import java.io.StringWriter;
+import java.io.Writer;
+import java.util.UUID;
+import java.util.Map;
+import java.time.Instant;
+
 
 @Path("/")
 public class LibertyRestEndpoint extends Application {
@@ -41,9 +52,11 @@ public class LibertyRestEndpoint extends Application {
     private final static String services_domain = System.getenv("SERVICES_DOMAIN") == null ? "" : ("." + System.getenv("SERVICES_DOMAIN"));
     private final static String ratings_hostname = System.getenv("RATINGS_HOSTNAME") == null ? "ratings" : System.getenv("RATINGS_HOSTNAME");
     private final static String ratings_service = "http://" + ratings_hostname + services_domain + ":9080/ratings";
+    private final static String service_uuid = "reviewsservice-" + UUID.randomUUID().toString();
     // HTTP headers to propagate for distributed tracing are documented at
     // https://istio.io/docs/tasks/telemetry/distributed-tracing/overview/#trace-context-propagation
     private final static String[] headers_to_propagate = {
+        "fi-trace",
         // All applications should propagate x-request-id. This header is
         // included in access log statements and is used for consistent trace
         // sampling and log sampling decisions in Istio.
@@ -90,6 +103,16 @@ public class LibertyRestEndpoint extends Application {
         "user-agent",
     };
 
+    private JsonObjectBuilder jsonObjectToBuilder(JsonObject obj) {
+        JsonObjectBuilder job = Json.createObjectBuilder();
+
+        for (Map.Entry<String, JsonValue> entry : obj.entrySet()) {
+            job.add(entry.getKey(), entry.getValue());
+        }
+
+        return job;
+    }
+
     private String getJsonResponse (String productId, int starsReviewer1, int starsReviewer2) {
     	String result = "{";
     	result += "\"id\": \"" + productId + "\",";
@@ -130,15 +153,23 @@ public class LibertyRestEndpoint extends Application {
     }
     
     private JsonObject getRatings(String productId, HttpHeaders requestHeaders) {
+      // Builder for Client HTTP request to Node js app for ratings
       ClientBuilder cb = ClientBuilder.newBuilder();
       Integer timeout = star_color.equals("black") ? 10000 : 2500;
       cb.property("com.ibm.ws.jaxrs.client.connection.timeout", timeout);
       cb.property("com.ibm.ws.jaxrs.client.receive.timeout", timeout);
+
+      // Client Connection
       Client client = cb.build();
+      // Target for ratings application
+      // "http://" + ratings_hostname + services_domain + ":9080/ratings" / productId
       WebTarget ratingsTarget = client.target(ratings_service + "/" + productId);
+      // Request for Json response
       Invocation.Builder builder = ratingsTarget.request(MediaType.APPLICATION_JSON);
+
       for (String header : headers_to_propagate) {
         String value = requestHeaders.getHeaderString(header);
+
         if (value != null) {
           builder.header(header,value);
         }
@@ -174,7 +205,62 @@ public class LibertyRestEndpoint extends Application {
       int starsReviewer1 = -1;
       int starsReviewer2 = -1;
 
+      /*
+        1. Handle record of Request
+      */
+      String traceMeta = requestHeaders.getHeaderString("fi-trace");
+      JsonReader reader = Json.createReader(new StringReader(traceMeta));
+      JsonObject jsonObject = reader.readObject();
+
+      // New object builder
+      JsonObjectBuilder job = Json.createObjectBuilder();
+
+      // Needed
+      JsonArrayBuilder recordBuilder = Json.createArrayBuilder();
+      String last_uuid = "";
+
+      // Iterate through incoming records
+      for (String key : jsonObject.keySet()) {
+        // If records we need to add a new record for the request
+        if (key.equals("records")) {
+          JsonArray jsonArray = jsonObject.getJsonArray(key);
+          for (JsonValue jsonVal: jsonArray) {
+            recordBuilder.add(jsonVal);
+            JsonObject recObject = (JsonObject) jsonVal;
+            last_uuid = recObject.getString("uuid");
+          }
+
+
+          JsonObject requestRecord = Json.createObjectBuilder()
+                                    .add("message_name", "Products Review Request")
+                                    .add("service", service_uuid)
+                                    .add("timestamp", Instant.now().getEpochSecond())
+                                    .add("type", 2)
+                                    .add("uuid", last_uuid)
+                                    .build();
+
+          recordBuilder.add(requestRecord);
+        } else {
+          job.add(key, jsonObject.get(key));
+        }
+      }
+
+      JsonArray newArray = recordBuilder.build();
+      job.add("records", newArray);
+
+      // Newly created Object with new record
+      jsonObject = job.build();
+
+      Writer writer = new StringWriter();
+      Json.createWriter(writer).write(jsonObject);
+      /*
+        Finish adding record or Response
+      */
+      String jsonString = writer.toString();
+
+
       if (ratings_enabled) {
+        // Call to Node JS Application
         JsonObject ratingsResponse = getRatings(Integer.toString(productId), requestHeaders);
         if (ratingsResponse != null) {
           if (ratingsResponse.containsKey("ratings")) {
@@ -187,9 +273,60 @@ public class LibertyRestEndpoint extends Application {
             }
           }
         }
-      } 
+      }
 
       String jsonResStr = getJsonResponse(Integer.toString(productId), starsReviewer1, starsReviewer2);
-      return Response.ok().type(MediaType.APPLICATION_JSON).entity(jsonResStr).build();
+
+
+      /*
+        2. Handle record of Response
+      */
+      // New object builder
+      job = Json.createObjectBuilder();
+
+      // Needed
+      recordBuilder = Json.createArrayBuilder();
+      last_uuid = "";
+
+      // Iterate through incoming records
+      for (String key : jsonObject.keySet()) {
+        // If records we need to add a new record for the request
+        if (key.equals("records")) {
+          JsonArray jsonArray = jsonObject.getJsonArray(key);
+          for (JsonValue jsonVal: jsonArray) {
+            recordBuilder.add(jsonVal);
+            JsonObject recObject = (JsonObject) jsonVal;
+            last_uuid = recObject.getString("uuid");
+          }
+
+
+          JsonObject requestRecord = Json.createObjectBuilder()
+                                    .add("message_name", "Products Review Response")
+                                    .add("service", service_uuid)
+                                    .add("timestamp", Instant.now().getEpochSecond())
+                                    .add("type", 1)
+                                    .add("uuid", last_uuid)
+                                    .build();
+
+          recordBuilder.add(requestRecord);
+        } else {
+          job.add(key, jsonObject.get(key));
+        }
+      }
+
+      newArray = recordBuilder.build();
+      job.add("records", newArray);
+
+      // Newly created Object with new record
+      jsonObject = job.build();
+
+      writer = new StringWriter();
+      Json.createWriter(writer).write(jsonObject);
+      /*
+        Finish adding record or Response
+      */
+      jsonString = writer.toString();
+
+      return Response.ok().type(MediaType.APPLICATION_JSON).entity(jsonResStr).header("fi-trace", jsonString).build();
     }
 }
