@@ -16,7 +16,7 @@ var http = require('http')
 var dispatcher = require('httpdispatcher')
 var uuid = require('uuid')
 
-var serviceUUID = uuid.v4();
+var serviceUUID = "ratingsservice-" + uuid.v4();
 
 var port = parseInt(process.argv[2])
 
@@ -91,10 +91,11 @@ dispatcher.onPost(/^\/ratings\/[0-9]*/, function (req, res) {
 
 function generateRecord(id, type, messageName, service) {
     return {
-        "uuid": id,
-        "type": type,
         "message_name": messageName,
-        "service": service
+        "service": service,
+        "timestamp": parseInt(Date.now()),
+        "type": type,
+        "uuid": id
     };
 }
 
@@ -233,6 +234,8 @@ function putLocalReviews (productId, ratings) {
 
 function getLocalReviewsSuccessful(req, res, productId) {
   var FI_TRACE = false;
+  var curr_uuid = "";
+  var message_name = "";
   var data = {
       "records": [],
       "rlfis": [],
@@ -243,19 +246,23 @@ function getLocalReviewsSuccessful(req, res, productId) {
   if (req.headers["fi-trace"]) {
       FI_TRACE = true;
       data = JSON.parse(req.headers["fi-trace"]);
+      var last_req_record = data["records"][data["records"].length - 1];
+      curr_uuid = last_req_record["uuid"];
+      message_name = last_req_record["message_name"];
   }
 
   // Make note of the request
-  data.records.push(generateRecord("IN RATINGS", 2, "product ratings request", serviceUUID))
+  data.records.push(generateRecord(curr_uuid, 2, message_name, serviceUUID))
 
   var responseData = JSON.stringify(getLocalReviews(productId));
+
+  // Make note of the response
+  data.records.push(generateRecord(curr_uuid, 1, "Product Ratings Response", serviceUUID))
+
   var headers = {
       "Content-type": "application/json",
       "fi-trace": JSON.stringify(data)
   }
-
-  // Make note of the response
-  data.records.push(generateRecord("IN RATINGS", 1, "product ratings response", serviceUUID))
 
   res.writeHead(200, headers)
   res.end(responseData)
